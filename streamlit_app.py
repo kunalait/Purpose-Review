@@ -1,10 +1,10 @@
-
 import streamlit as st 
 import pandas as pd
 import requests
 from PIL import Image
 from io import BytesIO
 import ast
+import random
 
 # Load dataset
 file_path = "categorized_reviews_output.csv"
@@ -71,27 +71,73 @@ st.markdown("""
     overflow-x: auto;
     gap: 10px;
 }
+.fixed-bottom-right {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    background-color: #ff914d;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: bold;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    text-align: center;
+    z-index: 9999;
+    cursor: pointer;
+}
+.fixed-bottom-right:hover {
+    background-color: #e67300;
+}
 </style>
-<div class='top-bar'>
+<div class="top-bar">
     <div><b>Vacos.de</b></div>
-    <div class='search-box'><input type='text' placeholder='Search (disabled in study version)' disabled></div>
+    <div class="search-box"><input type="text" placeholder="Search (disabled in study version)" disabled></div>
     <div>Delivering to Essen 45127 | EN | Account & Lists | Orders | 🛒</div>
 </div>
 """, unsafe_allow_html=True)
 
-# --- Purpose filter disabled ---
+# --- Bottom-Right Button to Return to SoSci Survey ---
+st.markdown("""
+<a href="https://www.soscisurvey.de/prodpurp/index.php?i=ZO8Z3FJQ09XL&rnd=UITP" target="_top">
+    <div class="fixed-bottom-right">✅ Return to Study</div>
+</a>
+""", unsafe_allow_html=True)
+
+# --- Sidebar Filters (Disabled) ---
+st.sidebar.header("Filter by (locked):")
+st.sidebar.markdown("🔒 The filters below are visible but disabled for this study.")
+st.sidebar.slider("Max Price", 50, 1500, 1000, disabled=True)
+st.sidebar.slider("Minimum Rating", 0.0, 5.0, 3.0, 0.1, disabled=True)
+st.sidebar.slider("Minimum RAM (GB)", 2, 32, 4, disabled=True)
+
+# --- Purpose Filter ---
 category_filter = st.sidebar.selectbox(
-    "Review Purpose (disabled for this version)", 
-    ["All"], index=0, disabled=True
+    "Review Purpose (active)", 
+    ["All", "student", "creative", "professional", "gaming", "personal", "travel", "none"]
 )
 
-filtered_df = laptop_df.copy()
-st.info("Showing laptops ranked by general information such as rating and price.")
+# --- Filter by Category ---
+if category_filter == "All":
+    filtered_df = laptop_df.copy()
+    st.info("Showing all laptops. Select a review purpose to narrow down results.")
+else:
+    filtered_df = laptop_df[laptop_df["Detected_Categories"].str.contains(category_filter, case=False, na=False)].copy()
+    st.info(f"Showing laptops reviewed for the purpose: **{category_filter.capitalize()}**")
 
-# --- Sort by general criteria ---
-filtered_df = filtered_df.sort_values(by=["ratingAvg", "price"], ascending=[False, True])
+# --- Matching Count
+def count_matching_reviews(row, category):
+    if category == "All":
+        return 0
+    reviews = str(row.get("ReviewsN", "")).split("||")
+    cats = str(row.get("Detected_Categories", "")).split("||")
+    return sum(1 for c in cats if c.strip().lower() == category.lower())
 
-# --- Pagination ---
+filtered_df["category_match_count"] = filtered_df.apply(lambda row: count_matching_reviews(row, category_filter), axis=1)
+
+# --- Sort Laptops
+filtered_df = filtered_df.sort_values(by=["category_match_count", "ratingAvg"], ascending=[False, False])
+
+# --- Pagination
 st.sidebar.write(f"Filtered results: {len(filtered_df)} laptops")
 items_per_page = 20
 total_items = len(filtered_df)
@@ -101,10 +147,12 @@ if "page" not in st.session_state:
     st.session_state.page = 1
 
 prev_col, next_col = st.sidebar.columns(2)
-if prev_col.button("⬅️") and st.session_state.page > 1:
-    st.session_state.page -= 1
-if next_col.button("➡️") and st.session_state.page < total_pages:
-    st.session_state.page += 1
+with prev_col:
+    if st.button("⬅️ Previous") and st.session_state.page > 1:
+        st.session_state.page -= 1
+with next_col:
+    if st.button("Next ➡️") and st.session_state.page < total_pages:
+        st.session_state.page += 1
 
 page = st.session_state.page
 start_idx = (page - 1) * items_per_page
@@ -112,12 +160,13 @@ end_idx = start_idx + items_per_page
 current_df = filtered_df.iloc[start_idx:end_idx]
 st.sidebar.markdown(f"**Page {page} of {total_pages}**")
 
-# --- Display Laptops ---
+# --- Display Laptops
 st.markdown("## Laptop Results")
 
 for _, row in current_df.iterrows():
     col1, col2, col3 = st.columns([1, 2, 2])
 
+    # --- Column 1: Images
     with col1:
         try:
             img_urls = ast.literal_eval(row["imageURLs"]) if isinstance(row["imageURLs"], str) else []
@@ -133,9 +182,11 @@ for _, row in current_df.iterrows():
         except:
             st.markdown("<div class='product-detail'>[Invalid image format]</div>", unsafe_allow_html=True)
 
+    # --- Column 2: Info
     with col2:
         st.markdown(f"<div class='product-title'>{row.get('titleStandard', 'No Title')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='product-detail'>⭐ {row.get('ratingAvgDisplay', '-')}/5 ({row.get('ratingNum', '0')} reviews)</div>", unsafe_allow_html=True)
+        st.markdown("<div class='product-detail'><b>Limited time deal</b></div>", unsafe_allow_html=True)
         st.markdown(f"<div class='price-block'>€{row.get('price', '-')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='product-detail'><b>Display Size:</b> {row.get('screenSize', '-')}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='product-detail'><b>Hard disk:</b> {row.get('storageType', '-')}</div>", unsafe_allow_html=True)
@@ -143,12 +194,37 @@ for _, row in current_df.iterrows():
         st.markdown(f"<div class='product-detail'><b>Memory:</b> {row.get('systemMemoryRam', '-')}</div>", unsafe_allow_html=True)
         st.link_button("Add to basket", row.get("productURL", "#"))
 
+    # --- Column 3: Purpose-Matched Reviews
     with col3:
-        reviews = str(row.get("ReviewsN", "")).split("||")
-        if reviews:
+        good_reviews = row.get("ReviewsN", "")
+        detected_cats = row.get("Detected_Categories", "")
+        snippets = []
+
+        if isinstance(good_reviews, str) and good_reviews.strip():
+            review_list = good_reviews.split("||")
+            category_list = str(detected_cats).split("||") if isinstance(detected_cats, str) else []
+
+            for review, cat in zip(review_list, category_list):
+                review = review.strip()
+                cat = cat.strip().lower()
+                if category_filter == "All":
+                    snippets.append((review, ''))  # show all
+                elif category_filter.lower() == cat:
+                    snippets.append((review, 'font-weight:bold;color:blue;'))  # match only
+
+        if snippets:
             st.markdown("<div class='review-box'><b>What users say:</b>", unsafe_allow_html=True)
-            for review in reviews[:5]:
-                st.markdown(f"<div class='product-detail'>• {review.strip()}</div>", unsafe_allow_html=True)
+            for snip, style in snippets[:5]:
+                st.markdown(f"<div class='product-detail' style='{style}'>• {snip}</div>", unsafe_allow_html=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
+
+# --- Download Button ---
+st.download_button(
+    label="Download Filtered CSV",
+    data=filtered_df.to_csv(index=False).encode('utf-8'),
+    file_name="filtered_laptops.csv",
+    mime="text/csv"
+)
+
